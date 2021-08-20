@@ -1,10 +1,9 @@
-package main
+package garys_tricks
 
 import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"time"
 
@@ -52,16 +51,6 @@ func insertTrick(w http.ResponseWriter, r *http.Request) {
 
 func startPage(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "Start page hit!")
-}
-
-func HandleRequests() {
-	myRouter := mux.NewRouter().StrictSlash(true)
-	myRouter.HandleFunc("/", startPage)
-	myRouter.HandleFunc("/tricks", listAllTricks).Methods("GET")
-	myRouter.HandleFunc("/tricks", insertTrick).Methods("POST")
-	myRouter.HandleFunc("/tricks/{id}", listOneTrick).Methods("GET")
-	//myRouter.HandleFunc("/tricks/{id}", updateOneTrick).Methods("PUT")
-	log.Fatal(http.ListenAndServe(":8081", myRouter))
 }
 
 func main() {
