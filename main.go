@@ -15,11 +15,12 @@ import (
 var db *sql.DB
 
 type Trick struct {
-	ID          int    `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Difficulty  string `json:"difficulty"`
-	Progress    string `json:"progress"`
+	ID             int    `json:"id"`
+	Name           string `json:"name"`
+	TranslatedName string `json:"translatedName"`
+	Description    string `json:"description"`
+	Difficulty     string `json:"difficulty"`
+	Progress       string `json:"progress"`
 }
 
 func main() {
@@ -42,6 +43,7 @@ func createTable() {
     CREATE TABLE IF NOT EXISTS tricks (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT,
+		translatedName TEXT,
         description TEXT,
 		difficulty TEXT,
 		progress TEXT
@@ -75,7 +77,7 @@ func handleTricksGet(w http.ResponseWriter, r *http.Request) {
 	tricks := make([]Trick, 0)
 	for rows.Next() {
 		var t Trick
-		if err := rows.Scan(&t.ID, &t.Name, &t.Description, &t.Difficulty, &t.Progress); err != nil {
+		if err := rows.Scan(&t.ID, &t.Name, &t.TranslatedName, &t.Description, &t.Difficulty, &t.Progress); err != nil {
 			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 			return
 		}
@@ -95,7 +97,7 @@ func handleTricksPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res, err := db.Exec("INSERT INTO tricks (name,description,difficulty,progress) VALUES (?,?,?,?)", t.Name, t.Description, t.Difficulty, t.Progress)
+	res, err := db.Exec("INSERT INTO tricks (name,translatedName,description,difficulty,progress) VALUES (?,?,?,?,?)", t.Name, &t.TranslatedName, t.Description, t.Difficulty, t.Progress)
 	if err != nil {
 		fmt.Println("Error: ", err)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
@@ -132,14 +134,15 @@ func handleTricksPut(w http.ResponseWriter, r *http.Request) {
 	}
 
 	t.ID = id
-
-	dbreq, err := db.Exec("UPDATE tricks SET name='" + t.Name + "', description='" + t.Description + "', difficulty='" + t.Difficulty + "', progress='" + t.Progress + "' WHERE id=" + strconv.Itoa(id))
-
-	fmt.Println(dbreq)
-
-	fmt.Println("SQL Statement: ", "UPDATE tricks SET name='"+t.Name+"', description='"+t.Description+"', difficulty='"+t.Difficulty+"', progress='"+t.Progress+"' WHERE id="+strconv.Itoa(id))
+	stmt, err := db.Prepare("UPDATE tricks SET name=?, translatedName=?, description=?, difficulty=?, progress=? WHERE id=?")
 	if err != nil {
-		fmt.Println("Error: ", err)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	defer stmt.Close()
+
+	_, err = stmt.Exec(t.Name, t.TranslatedName, t.Description, t.Difficulty, t.Progress, id)
+	if err != nil {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
