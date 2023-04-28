@@ -4,153 +4,98 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
-	"strconv"
+	"net/http/httptest"
+	"os"
+	"strings"
 
-	"github.com/gorilla/mux"
-
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	_ "github.com/mattn/go-sqlite3"
 )
 
 var db *sql.DB
 
-type Trick struct {
-	ID             int    `json:"id"`
-	Name           string `json:"name"`
-	TranslatedName string `json:"translatedName"`
-	Description    string `json:"description"`
-	Difficulty     string `json:"difficulty"`
-	Progress       string `json:"progress"`
+func getAllTricks() (string, error) {
+	req, err := http.NewRequest("GET", "/tricks", nil)
+	if err != nil {
+		return "", err
+	}
+
+	rr := httptest.NewRecorder()
+
+	handleTricks(rr, req)
+
+	if rr.Code != http.StatusOK {
+		return "", fmt.Errorf("failed to retrieve tricks, status code: %d", rr.Code)
+	}
+
+	var tricks []Trick
+	if err := json.NewDecoder(rr.Body).Decode(&tricks); err != nil {
+		return "", err
+	}
+
+	var tricksText strings.Builder
+	for _, trick := range tricks {
+		tricksText.WriteString("Trick Name: ")
+		tricksText.WriteString(trick.Name)
+		tricksText.WriteString("\n")
+		tricksText.WriteString("Trick Description: ")
+		tricksText.WriteString(trick.Description)
+		tricksText.WriteString("\n")
+		tricksText.WriteString("Difficulty: ")
+		tricksText.WriteString(trick.Difficulty)
+		tricksText.WriteString("\n")
+		tricksText.WriteString("Progress: ")
+		tricksText.WriteString(trick.Progress)
+		tricksText.WriteString("\n")
+		tricksText.WriteString("\n")
+	}
+
+	return tricksText.String(), nil
 }
 
 func main() {
+
 	var err error
 	db, err = sql.Open("sqlite3", "./tricks.db")
 	if err != nil {
 		panic(err)
 	}
+	createTable()
 	defer db.Close()
 
-	createTable()
-	router := mux.NewRouter()
-	router.HandleFunc("/tricks/{id}", handleTricksPut).Methods("PUT")
-	router.HandleFunc("/tricks", handleTricks).Methods("GET", "POST")
-	http.ListenAndServe(":8080", router)
-}
-
-func createTable() {
-	_, err := db.Exec(`
-    CREATE TABLE IF NOT EXISTS tricks (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT,
-		translatedName TEXT,
-        description TEXT,
-		difficulty TEXT,
-		progress TEXT
-    )`)
+	bot, err := tgbotapi.NewBotAPI(os.Getenv("GARYS_TRICKS_TELEGRAM_TOKEN"))
 	if err != nil {
-		panic(err)
+		log.Panic(err)
 	}
-}
+	bot.Debug = true
+	log.Printf("Authorized on account %s", bot.Self.UserName)
+	u := tgbotapi.NewUpdate(0)
+	u.Timeout = 60
+	updates := bot.GetUpdatesChan(u)
 
-func handleTricks(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case http.MethodGet:
-		handleTricksGet(w, r)
-	case http.MethodPost:
-		handleTricksPost(w, r)
-	case http.MethodPut:
-		handleTricksPut(w, r)
-	default:
-		http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
-	}
-}
+	for update := range updates {
+		if update.Message != nil {
+			log.Printf("[%s] %s", update.Message.From.UserName, update.Message.Text)
 
-func handleTricksGet(w http.ResponseWriter, r *http.Request) {
-	rows, err := db.Query("SELECT * FROM tricks")
-	if err != nil {
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-		return
-	}
-	defer rows.Close()
+			msg := tgbotapi.NewMessage(update.Message.Chat.ID, update.Message.Text)
+			msg.ReplyToMessageID = update.Message.MessageID
 
-	tricks := make([]Trick, 0)
-	for rows.Next() {
-		var t Trick
-		if err := rows.Scan(&t.ID, &t.Name, &t.TranslatedName, &t.Description, &t.Difficulty, &t.Progress); err != nil {
-			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-			return
+			switch update.Message.Command() {
+			case "Tricks":
+				msg.Text, err = getAllTricks()
+				if err != nil {
+					msg.Text = "Failed to retrieve tricks"
+				}
+			case "TagebuchUebersicht":
+				msg.Text = "Hier kommen Garys TagebuchEinträge"
+			case "TagebuchEintrag":
+				msg.Text = "Hier kannst du einen Eintrag hinzufügen"
+			default:
+				msg.Text = "I don't know that command"
+			}
+			bot.Send(msg)
 		}
-		tricks = append(tricks, t)
 	}
-
-	if err := json.NewEncoder(w).Encode(tricks); err != nil {
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-		return
-	}
-}
-
-func handleTricksPost(w http.ResponseWriter, r *http.Request) {
-	var t Trick
-	if err := json.NewDecoder(r.Body).Decode(&t); err != nil {
-		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-		return
-	}
-
-	res, err := db.Exec("INSERT INTO tricks (name,translatedName,description,difficulty,progress) VALUES (?,?,?,?,?)", t.Name, &t.TranslatedName, t.Description, t.Difficulty, t.Progress)
-	if err != nil {
-		fmt.Println("Error: ", err)
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-		return
-	}
-
-	id, err := res.LastInsertId()
-	if err != nil {
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-		return
-	}
-
-	t.ID = int(id)
-
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(t); err != nil {
-		fmt.Println("Error: ", err)
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-		return
-	}
-}
-
-func handleTricksPut(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.Atoi(mux.Vars(r)["id"])
-	if err != nil {
-		http.Error(w, "Invalid Trick ID", http.StatusBadRequest)
-		return
-	}
-
-	var t Trick
-	if err := json.NewDecoder(r.Body).Decode(&t); err != nil {
-		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-		return
-	}
-
-	t.ID = id
-	stmt, err := db.Prepare("UPDATE tricks SET name=?, translatedName=?, description=?, difficulty=?, progress=? WHERE id=?")
-	if err != nil {
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-		return
-	}
-	defer stmt.Close()
-
-	_, err = stmt.Exec(t.Name, t.TranslatedName, t.Description, t.Difficulty, t.Progress, id)
-	if err != nil {
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(t); err != nil {
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-		return
-	}
-	w.WriteHeader(http.StatusOK)
 }
