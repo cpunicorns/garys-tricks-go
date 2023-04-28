@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -55,8 +56,37 @@ func getAllTricks() (string, error) {
 	return tricksText.String(), nil
 }
 
-func main() {
+func InsertNewTrick(newTrick string) (string, error) {
+	cleanString := strings.Replace(newTrick, "/NewTrick", "", -1)
+	splittedTrick := strings.Split(cleanString, ",")
+	fmt.Println("InsertNewTrick debug splitted trick string: ", splittedTrick)
 
+	newTrickJSON, err := json.Marshal(splittedTrick)
+	if err != nil {
+		return "", err
+	}
+
+	resp, err := http.Post("http://localhost:8080/tricks", "application/json", bytes.NewBuffer(newTrickJSON))
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	var insertedTrick Trick
+	if err := json.NewDecoder(resp.Body).Decode(&insertedTrick); err != nil {
+		return "", err
+	}
+
+	var trickText strings.Builder
+	trickText.WriteString(insertedTrick.Name)
+	trickText.WriteString(insertedTrick.Description)
+	trickText.WriteString(insertedTrick.Difficulty)
+	trickText.WriteString(insertedTrick.Progress)
+
+	return trickText.String(), nil
+}
+
+func main() {
 	var err error
 	db, err = sql.Open("sqlite3", "./tricks.db")
 	if err != nil {
@@ -87,6 +117,11 @@ func main() {
 				msg.Text, err = getAllTricks()
 				if err != nil {
 					msg.Text = "Failed to retrieve tricks"
+				}
+			case "NewTrick":
+				msg.Text, err = InsertNewTrick(update.Message.Text)
+				if err != nil {
+					msg.Text = "Failed to insert new trick"
 				}
 			case "TagebuchUebersicht":
 				msg.Text = "Hier kommen Garys TagebuchEinträge"
